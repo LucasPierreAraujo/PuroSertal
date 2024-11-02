@@ -2,16 +2,10 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { FaTrash } from 'react-icons/fa';
 
-const availableItems = [
-  { name: 'Coca Cola Lata', price: 6 },
-  { name: 'Panelada Pequena', price: 32 },
-  { name: 'Pizza Grande', price: 45 },
-];
-
 const OrderDetail = () => {
   const { orderId } = useParams();
   const navigate = useNavigate();
-  
+
   const [order, setOrder] = useState(null);
   const [paymentValue, setPaymentValue] = useState('');
   const [itemInput, setItemInput] = useState('');
@@ -19,8 +13,22 @@ const OrderDetail = () => {
   const [removeQuantity, setRemoveQuantity] = useState(1);
   const [paymentMethod, setPaymentMethod] = useState('Dinheiro');
   const [suggestedItems, setSuggestedItems] = useState([]);
+  const [availableItems, setAvailableItems] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [orderDateTime, setOrderDateTime] = useState(''); // Novo estado para armazenar a data e hora
 
-  const suggestionsRef = useRef(null); // Ref para o contêiner das sugestões
+  const suggestionsRef = useRef(null);
+
+  const loadProductsFromLocalStorage = useCallback(() => {
+    const savedProducts = localStorage.getItem('products');
+    return savedProducts ? JSON.parse(savedProducts) : [];
+  }, []);
+
+  const loadClientsFromLocalStorage = useCallback(() => {
+    const savedClients = localStorage.getItem('clients');
+    return savedClients ? JSON.parse(savedClients) : [];
+  }, []);
 
   const loadOrderFromLocalStorage = useCallback((id) => {
     const savedOrders = localStorage.getItem('orders');
@@ -35,13 +43,19 @@ const OrderDetail = () => {
     const loadedOrder = loadOrderFromLocalStorage(orderId);
     if (loadedOrder) {
       setOrder(loadedOrder);
+      setOrderDateTime(new Date(loadedOrder.createdAt).toLocaleString()); // Definindo a data e hora da comanda
     } else {
       alert('Comanda não encontrada!');
       navigate('/orders');
     }
-  }, [orderId, navigate, loadOrderFromLocalStorage]);
 
-  // Função para ocultar sugestões quando clicado fora
+    const products = loadProductsFromLocalStorage();
+    setAvailableItems(products);
+
+    const clients = loadClientsFromLocalStorage();
+    setClients(clients);
+  }, [orderId, navigate, loadOrderFromLocalStorage, loadProductsFromLocalStorage, loadClientsFromLocalStorage]);
+
   const handleClickOutside = (event) => {
     if (suggestionsRef.current && !suggestionsRef.current.contains(event.target)) {
       setSuggestedItems([]);
@@ -68,6 +82,23 @@ const OrderDetail = () => {
   };
 
   const handlePayment = () => {
+    if (paymentMethod === 'Fiado' && selectedClient) {
+      const updatedClient = { ...selectedClient };
+      updatedClient.orders = [...(updatedClient.orders || []), { ...order, items: order.items }];
+
+      const allClients = loadClientsFromLocalStorage();
+      const updatedClients = allClients.map(client => (client.id === updatedClient.id ? updatedClient : client));
+      localStorage.setItem('clients', JSON.stringify(updatedClients));
+      
+      alert('Comanda salva no perfil do cliente com sucesso!');
+
+      const updatedOrder = { ...order, isClosed: true };
+      updateOrderInLocalStorage(updatedOrder);
+      setOrder(updatedOrder);
+      navigate('/clients');
+      return;
+    }
+
     const payment = parseFloat(paymentValue);
     if (!validatePayment(payment)) return;
 
@@ -78,9 +109,14 @@ const OrderDetail = () => {
       isClosed: order.totalPaid + payment >= order.total,
     };
 
+    if (paymentMethod === 'Fiado' && selectedClient) {
+      updatedOrder.clientId = selectedClient.id;
+    }
+
     updateOrderInLocalStorage(updatedOrder);
     setOrder(updatedOrder);
     setPaymentValue('');
+    setSelectedClient(null);
   };
 
   const updateOrderInLocalStorage = (updatedOrder) => {
@@ -165,101 +201,83 @@ const OrderDetail = () => {
   };
 
   const handleItemSelect = (item) => {
-    setItemInput(item.name); // Define o nome do item no campo de entrada
-    setItemQuantity(1); // Reseta a quantidade para 1 ao selecionar um item
-    setSuggestedItems([]); // Limpa as sugestões
+    setItemInput(item.name);
+    setItemQuantity(1);
+    setSuggestedItems([]);
   };
 
-  if (!order) return <div>Carregando...</div>;
+  if (!order) return <div className="text-center text-gray-500">Carregando...</div>;
 
   const totalDue = order.total - order.totalPaid;
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
-      <button onClick={() => navigate('/orders')} className="mb-4 p-2 bg-gray-300 rounded hover:bg-gray-400">
+      <button onClick={() => navigate('/orders')} className="mb-4 p-2 text-sm font-medium text-white bg-blue-600 rounded hover:bg-blue-700 shadow-md">
         Voltar para Comandas
       </button>
-      <h1 className="text-3xl font-bold text-gray-800 mb-6">
-        {order.name} {order.isClosed && '(Comanda Fechada)'}
+      <h1 className="text-2xl font-semibold text-gray-700 mb-4">
+        {order.name} {order.isClosed && <span className="text-sm font-normal text-gray-500">(Comanda Fechada)</span>}
       </h1>
-      <ul className="mb-4">
+      <p className="text-gray-600">Data e Hora de Abertura: {orderDateTime}</p> {/* Exibindo a data e hora */}
+      <ul className="space-y-2 mb-4">
         {order.items.map((item, index) => (
-          <li key={index} className="flex justify-between items-center text-gray-700 mb-2">
-            <span>
+          <li key={index} className="flex justify-between items-center bg-white p-3 rounded shadow">
+            <span className="text-gray-800 font-medium">
               {item.name} - R$ {item.price.toFixed(2)} x {item.quantity} = R$ {(item.price * item.quantity).toFixed(2)}
             </span>
-            <div className="flex items-center">
+            <div className="flex items-center space-x-2">
               <input
                 type="number"
                 value={removeQuantity}
                 onChange={(e) => setRemoveQuantity(e.target.value)}
-                placeholder="Qtd"
                 min="1"
-                className="w-16 p-1 border border-gray-300 rounded text-center mr-2"
+                className="w-16 border border-gray-300 rounded p-1"
+                placeholder="Qtd."
               />
-              <button 
-                onClick={() => removeItem(item)} 
-                className="ml-2 p-1 text-red-500 hover:text-red-600"
-              >
-                <FaTrash size={20} />
+              <button onClick={() => removeItem(item)} className="p-1 text-red-600 hover:text-red-800">
+                <FaTrash />
               </button>
             </div>
           </li>
         ))}
       </ul>
-      <p className="text-lg font-bold text-gray-800">Total: R$ {order.total.toFixed(2)}</p>
-      <p className="text-lg font-bold text-gray-800">Total Pago: R$ {order.totalPaid.toFixed(2)}</p>
-      <p className="text-lg font-bold text-gray-800">Falta Pagar: R$ {totalDue.toFixed(2)}</p>
-      <div className="mt-4">
+      <div className="mb-4">
         <input
           type="text"
           value={itemInput}
           onChange={handleItemInputChange}
-          placeholder="Digite o nome do item"
-          className="p-1 border border-gray-300 rounded mr-2"
+          placeholder="Nome do item"
+          className="border border-gray-300 rounded p-2 w-full"
         />
         {suggestedItems.length > 0 && (
-          <ul ref={suggestionsRef} className="absolute bg-white border border-gray-300 rounded shadow-lg max-h-40 overflow-y-auto w-48 z-10">
+          <ul ref={suggestionsRef} className="border border-gray-300 rounded bg-white">
             {suggestedItems.map((item, index) => (
-              <li
-                key={index}
-                onClick={() => handleItemSelect(item)}
-                className="p-1 hover:bg-gray-200 cursor-pointer"
-                onMouseEnter={(e) => e.currentTarget.classList.add('bg-gray-200')}
-                onMouseLeave={(e) => e.currentTarget.classList.remove('bg-gray-200')}
-              >
-                {item.name}
+              <li key={index} onClick={() => handleItemSelect(item)} className="p-2 hover:bg-gray-200 cursor-pointer">
+                {item.name} - R$ {item.price.toFixed(2)}
               </li>
             ))}
           </ul>
         )}
+      </div>
+      <div className="flex space-x-4 mb-4">
         <input
           type="number"
           value={itemQuantity}
           onChange={(e) => setItemQuantity(e.target.value)}
-          placeholder="Qtd"
           min="1"
-          className="w-16 p-1 border border-gray-300 rounded mr-2"
+          className="border border-gray-300 rounded p-2 w-16"
+          placeholder="Qtd."
         />
-        <button 
-          onClick={addItem} 
-          className="p-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-        >
+        <button onClick={addItem} className="p-2 text-white bg-green-600 rounded hover:bg-green-700">
           Adicionar Item
         </button>
       </div>
-      <div className="mt-4">
-        <input
-          type="number"
-          value={paymentValue}
-          onChange={(e) => setPaymentValue(e.target.value)}
-          placeholder="Valor do Pagamento"
-          className="p-1 border border-gray-300 rounded mr-2"
-        />
+      <div className="mb-4">
+        <h2 className="font-medium text-gray-700">Método de Pagamento:</h2>
         <select
           value={paymentMethod}
           onChange={(e) => setPaymentMethod(e.target.value)}
-          className="p-1 border border-gray-300 rounded mr-2"
+          className="border border-gray-300 rounded p-2 w-full"
         >
           <option value="Dinheiro">Dinheiro</option>
           <option value="Pix">Pix</option>
@@ -267,13 +285,37 @@ const OrderDetail = () => {
           <option value="Crédito">Crédito</option>
           <option value="Fiado">Fiado</option>
         </select>
-        <button 
-          onClick={handlePayment} 
-          className="p-2 bg-green-500 text-white rounded hover:bg-green-600"
-        >
-          Finalizar Pagamento
+      </div>
+      {paymentMethod === 'Fiado' && (
+        <div className="mb-4">
+          <h2 className="font-medium text-gray-700">Selecionar Cliente:</h2>
+          <select
+            value={selectedClient ? selectedClient.id : ''}
+            onChange={(e) => setSelectedClient(clients.find(client => client.id === parseInt(e.target.value)))}
+            className="border border-gray-300 rounded p-2 w-full"
+          >
+            <option value="">Selecione um cliente</option>
+            {clients.map(client => (
+              <option key={client.id} value={client.id}>{client.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+      <div className="flex space-x-4 mb-4">
+        <input
+          type="text"
+          value={paymentValue}
+          onChange={(e) => setPaymentValue(e.target.value)}
+          placeholder="Valor do Pagamento"
+          className="border border-gray-300 rounded p-2 w-32"
+        />
+        <button onClick={handlePayment} className="p-2 text-white bg-blue-600 rounded hover:bg-blue-700">
+          Pagar
         </button>
       </div>
+      <h2 className="text-lg font-semibold text-gray-800">Total: R$ {order.total.toFixed(2)}</h2>
+      <h3 className="text-lg font-semibold text-gray-800">Total Pago: R$ {order.totalPaid.toFixed(2)}</h3>
+      <h3 className="text-lg font-semibold text-gray-800">Devido: R$ {totalDue.toFixed(2)}</h3>
     </div>
   );
 };
